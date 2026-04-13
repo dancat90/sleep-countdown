@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0d1117" />
+<title>Sleep Countdown</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    overscroll-behavior: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: env(safe-area-inset-top) 24px env(safe-area-inset-bottom);
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  h1 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #c9d1d9;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    font-size: 0.85rem;
+    color: #6e7681;
+    margin-bottom: 36px;
+  }
+  .picker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #161b22;
+    padding: 14px 18px;
+    border-radius: 14px;
+    border: 1px solid #21262d;
+    margin-bottom: 32px;
+  }
+  .picker label {
+    font-size: 0.9rem;
+    color: #8b949e;
+    margin-right: 4px;
+  }
+  .picker select {
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 1rem;
+    font-family: inherit;
+    appearance: none;
+    -webkit-appearance: none;
+    text-align: center;
+    min-width: 60px;
+  }
+  .picker .colon {
+    color: #c9d1d9;
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+  .countdown {
+    font-size: 5rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: #58a6ff;
+    line-height: 1;
+    margin-bottom: 18px;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.3s;
+  }
+  .countdown.idle { color: #30363d; }
+  .countdown.green { color: #3fb950; }
+  .countdown.yellow { color: #d29922; }
+  .countdown.red { color: #f85149; }
+  .info {
+    font-size: 0.95rem;
+    color: #c9d1d9;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+  .buffer {
+    font-size: 0.78rem;
+    color: #6e7681;
+    font-style: italic;
+    text-align: center;
+  }
+  .footer {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom) + 16px);
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 0.7rem;
+    color: #484f58;
+  }
+</style>
+</head>
+<body>
+  <h1>🌙 Sleep Countdown</h1>
+  <div class="subtitle">Quanto sonno ti rimane</div>
+
+  <div class="picker">
+    <label>Sveglia</label>
+    <select id="hour" aria-label="Ora"></select>
+    <span class="colon">:</span>
+    <select id="minute" aria-label="Minuti"></select>
+  </div>
+
+  <div class="countdown idle" id="countdown">--h --m</div>
+  <div class="info" id="info">Imposta l'ora della sveglia</div>
+  <div class="buffer">(buffer addormentamento: 15 min)</div>
+
+  <div class="footer">Tocca i selettori per cambiare l'orario</div>
+
+<script>
+  const BUFFER_MIN = 15;
+  const STORAGE_KEY = 'sleepCountdown.wakeTime';
+
+  const hourSel = document.getElementById('hour');
+  const minSel  = document.getElementById('minute');
+  const cd      = document.getElementById('countdown');
+  const info    = document.getElementById('info');
+
+  // Popola selettori
+  for (let h = 0; h < 24; h++) {
+    const o = document.createElement('option');
+    o.value = h; o.textContent = String(h).padStart(2, '0');
+    hourSel.appendChild(o);
+  }
+  for (let m = 0; m < 60; m += 5) {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = String(m).padStart(2, '0');
+    minSel.appendChild(o);
+  }
+
+  // Ripristina ultimo orario impostato
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    const [h, m] = saved.split(':').map(Number);
+    hourSel.value = h;
+    minSel.value = m;
+  } else {
+    hourSel.value = 7;
+    minSel.value = 0;
+  }
+
+  function getWakeDate() {
+    const h = parseInt(hourSel.value, 10);
+    const m = parseInt(minSel.value, 10);
+    const now = new Date();
+    const wake = new Date(now);
+    wake.setHours(h, m, 0, 0);
+    if (wake <= now) wake.setDate(wake.getDate() + 1);
+    return wake;
+  }
+
+  function persist() {
+    localStorage.setItem(STORAGE_KEY, `${hourSel.value}:${minSel.value}`);
+  }
+
+  function fmtWeekday(d) {
+    return d.toLocaleDateString('it-IT', { weekday: 'short' });
+  }
+
+  function tick() {
+    const wake = getWakeDate();
+    const now = new Date();
+    const effectiveMs = wake - now - BUFFER_MIN * 60 * 1000;
+
+    if (effectiveMs <= 0) {
+      cd.textContent = '0h 00m';
+      cd.className = 'countdown red';
+    } else {
+      const totalMin = Math.floor(effectiveMs / 60000);
+      const hours = Math.floor(totalMin / 60);
+      const mins = totalMin % 60;
+      cd.textContent = `${hours}h ${String(mins).padStart(2, '0')}m`;
+      cd.className = 'countdown ' +
+        (hours >= 7 ? 'green' : hours >= 5 ? 'yellow' : 'red');
+    }
+    info.textContent = `Sveglia: ${fmtWeekday(wake)} ${String(wake.getHours()).padStart(2,'0')}:${String(wake.getMinutes()).padStart(2,'0')}`;
+  }
+
+  hourSel.addEventListener('change', () => { persist(); tick(); });
+  minSel.addEventListener('change',  () => { persist(); tick(); });
+
+  tick();
+  setInterval(tick, 1000);
+
+  // Tieni schermo acceso se possibile (su PWA installata)
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').catch(() => {});
+  }
+
+  // Service worker per offline
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>
