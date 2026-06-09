@@ -1,4 +1,4 @@
-const CACHE = 'sleep-countdown-v1';
+const CACHE = 'sleep-countdown-v2';
 const ASSETS = [
   './',
   './index.html',

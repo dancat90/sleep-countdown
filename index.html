@@ -32,30 +32,43 @@
     font-size: 1.3rem;
     font-weight: 600;
     color: #c9d1d9;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     letter-spacing: -0.02em;
   }
   .subtitle {
     font-size: 0.85rem;
     color: #6e7681;
-    margin-bottom: 36px;
+    margin-bottom: 28px;
+    text-align: center;
   }
-  .picker {
+  .controls {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 10px;
     background: #161b22;
-    padding: 14px 18px;
+    padding: 16px 18px;
     border-radius: 14px;
     border: 1px solid #21262d;
-    margin-bottom: 32px;
+    margin-bottom: 30px;
+    width: 100%;
+    max-width: 340px;
   }
-  .picker label {
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .row label {
     font-size: 0.9rem;
     color: #8b949e;
-    margin-right: 4px;
   }
-  .picker select {
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  select, input[type="number"] {
     background: #0d1117;
     color: #c9d1d9;
     border: 1px solid #30363d;
@@ -66,44 +79,51 @@
     appearance: none;
     -webkit-appearance: none;
     text-align: center;
-    min-width: 60px;
   }
-  .picker .colon {
-    color: #c9d1d9;
-    font-weight: 700;
-    font-size: 1.1rem;
-  }
-  .countdown {
-    font-size: 5rem;
+  select { min-width: 58px; }
+  input[type="number"] { width: 64px; -moz-appearance: textfield; }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .colon { color: #c9d1d9; font-weight: 700; font-size: 1.05rem; }
+  .unit { color: #6e7681; font-size: 0.82rem; }
+  .result {
+    font-size: 4.6rem;
     font-weight: 700;
     letter-spacing: -0.04em;
     color: #58a6ff;
     line-height: 1;
-    margin-bottom: 18px;
+    margin-bottom: 10px;
     font-variant-numeric: tabular-nums;
     transition: color 0.3s;
   }
-  .countdown.idle { color: #30363d; }
-  .countdown.green { color: #3fb950; }
-  .countdown.yellow { color: #d29922; }
-  .countdown.red { color: #f85149; }
-  .info {
-    font-size: 0.95rem;
-    color: #c9d1d9;
-    margin-bottom: 6px;
+  .result.idle { color: #30363d; }
+  .result.green { color: #3fb950; }
+  .result.yellow { color: #d29922; }
+  .result.red { color: #f85149; }
+  .sub {
+    font-size: 1rem;
+    color: #8b949e;
+    margin-bottom: 16px;
+    font-variant-numeric: tabular-nums;
     text-align: center;
   }
+  .info {
+    font-size: 0.9rem;
+    color: #c9d1d9;
+    margin-bottom: 5px;
+    text-align: center;
+    line-height: 1.5;
+  }
   .buffer {
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     color: #6e7681;
     font-style: italic;
     text-align: center;
   }
   .footer {
     position: fixed;
-    bottom: calc(env(safe-area-inset-bottom) + 16px);
-    left: 0;
-    right: 0;
+    bottom: calc(env(safe-area-inset-bottom) + 14px);
+    left: 0; right: 0;
     text-align: center;
     font-size: 0.7rem;
     color: #484f58;
@@ -111,93 +131,145 @@
 </style>
 </head>
 <body>
-  <h1>🌙 Sleep Countdown</h1>
-  <div class="subtitle">Quanto sonno ti rimane</div>
+  <h1>🌙 A che ora dormire</h1>
+  <div class="subtitle">L'ora per coricarti e dormire quanto vuoi</div>
 
-  <div class="picker">
-    <label>Sveglia</label>
-    <select id="hour" aria-label="Ora"></select>
-    <span class="colon">:</span>
-    <select id="minute" aria-label="Minuti"></select>
+  <div class="controls">
+    <div class="row">
+      <label>Sveglia</label>
+      <div class="group">
+        <select id="wakeH" aria-label="Ora sveglia"></select>
+        <span class="colon">:</span>
+        <select id="wakeM" aria-label="Minuti sveglia"></select>
+      </div>
+    </div>
+    <div class="row">
+      <label>Voglio dormire</label>
+      <div class="group">
+        <select id="sleepH" aria-label="Ore di sonno"></select>
+        <span class="colon">:</span>
+        <select id="sleepM" aria-label="Minuti di sonno"></select>
+      </div>
+    </div>
+    <div class="row">
+      <label>Lettura</label>
+      <div class="group">
+        <input id="reading" type="number" min="0" step="5" inputmode="numeric" aria-label="Minuti di lettura" />
+        <span class="unit">min</span>
+      </div>
+    </div>
   </div>
 
-  <div class="countdown idle" id="countdown">--h --m</div>
-  <div class="info" id="info">Imposta l'ora della sveglia</div>
-  <div class="buffer">(buffer addormentamento: 15 min)</div>
+  <div class="result idle" id="result">--:--</div>
+  <div class="sub" id="sub">Imposta i dati</div>
+  <div class="info" id="info"></div>
+  <div class="buffer">+15 addormentamento &middot; +20 cane &middot; +15 cucina/igiene</div>
 
-  <div class="footer">Tocca i selettori per cambiare l'orario</div>
+  <div class="footer">Ora di coricarti calcolata a ritroso dalla sveglia</div>
 
 <script>
-  const BUFFER_MIN = 15;
-  const STORAGE_KEY = 'sleepCountdown.wakeTime';
+  /* === Tempi fissi (minuti) — modificabili qui === */
+  const BUFFER_MIN = 15;          // buffer di addormentamento (a letto -> sonno)
+  const CANE_MIN   = 20;          // passeggiata cane
+  const CUCINA_MIN = 15;          // riassetto cucina + pulizia personale
+  const SOGLIA_GIALLO_MIN = 30;   // entro quanto dall'ora di coricarsi scatta il giallo
+  const STORAGE_KEY = 'sleepCalc.v2';
 
-  const hourSel = document.getElementById('hour');
-  const minSel  = document.getElementById('minute');
-  const cd      = document.getElementById('countdown');
+  const wakeH   = document.getElementById('wakeH');
+  const wakeM   = document.getElementById('wakeM');
+  const sleepH  = document.getElementById('sleepH');
+  const sleepM  = document.getElementById('sleepM');
+  const reading = document.getElementById('reading');
+  const result  = document.getElementById('result');
+  const sub     = document.getElementById('sub');
   const info    = document.getElementById('info');
 
-  // Popola selettori
-  for (let h = 0; h < 24; h++) {
-    const o = document.createElement('option');
-    o.value = h; o.textContent = String(h).padStart(2, '0');
-    hourSel.appendChild(o);
+  // Popola un <select> con un range numerico, opzionalmente con padding a 2 cifre
+  function fill(sel, from, to, step, pad) {
+    for (let v = from; v <= to; v += step) {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = pad ? String(v).padStart(2, '0') : String(v);
+      sel.appendChild(o);
+    }
   }
-  for (let m = 0; m < 60; m += 5) {
-    const o = document.createElement('option');
-    o.value = m; o.textContent = String(m).padStart(2, '0');
-    minSel.appendChild(o);
-  }
+  fill(wakeH, 0, 23, 1, true);    // ore sveglia
+  fill(wakeM, 0, 55, 5, true);    // minuti sveglia (step 5)
+  fill(sleepH, 4, 12, 1, true);   // ore di sonno desiderate
+  fill(sleepM, 0, 45, 15, true);  // minuti di sonno (step 15)
 
-  // Ripristina ultimo orario impostato
-  const saved = localStorage.getItem(STORAGE_KEY);
+  // Ripristina gli ultimi valori inseriti, altrimenti default 07:00 / 8:00 / 30'
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
   if (saved) {
-    const [h, m] = saved.split(':').map(Number);
-    hourSel.value = h;
-    minSel.value = m;
+    wakeH.value = saved.wakeH; wakeM.value = saved.wakeM;
+    sleepH.value = saved.sleepH; sleepM.value = saved.sleepM;
+    reading.value = saved.reading;
   } else {
-    hourSel.value = 7;
-    minSel.value = 0;
-  }
-
-  function getWakeDate() {
-    const h = parseInt(hourSel.value, 10);
-    const m = parseInt(minSel.value, 10);
-    const now = new Date();
-    const wake = new Date(now);
-    wake.setHours(h, m, 0, 0);
-    if (wake <= now) wake.setDate(wake.getDate() + 1);
-    return wake;
+    wakeH.value = 7; wakeM.value = 0;
+    sleepH.value = 8; sleepM.value = 0;
+    reading.value = 30;
   }
 
   function persist() {
-    localStorage.setItem(STORAGE_KEY, `${hourSel.value}:${minSel.value}`);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      wakeH: wakeH.value, wakeM: wakeM.value,
+      sleepH: sleepH.value, sleepM: sleepM.value,
+      reading: reading.value,
+    }));
   }
 
-  function fmtWeekday(d) {
-    return d.toLocaleDateString('it-IT', { weekday: 'short' });
+  // Prossima occorrenza dell'orario della sveglia (oggi se non ancora passato, altrimenti domani)
+  function nextWake() {
+    const now = new Date();
+    const w = new Date(now);
+    w.setHours(+wakeH.value, +wakeM.value, 0, 0);
+    if (w <= now) w.setDate(w.getDate() + 1);
+    return w;
   }
+
+  const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const wd   = d => d.toLocaleDateString('it-IT', { weekday: 'short' });
 
   function tick() {
-    const wake = getWakeDate();
-    const now = new Date();
-    const effectiveMs = wake - now - BUFFER_MIN * 60 * 1000;
+    const lettura  = Math.max(0, parseInt(reading.value, 10) || 0);
+    const sonnoMin = (+sleepH.value) * 60 + (+sleepM.value);
 
-    if (effectiveMs <= 0) {
-      cd.textContent = '0h 00m';
-      cd.className = 'countdown red';
+    /* Calcolo a ritroso dalla sveglia:
+       sveglia -> addormentato -> a letto (luci spente) -> ora di coricarsi (inizio routine) */
+    const wake         = nextWake();
+    const addormentato = new Date(wake.getTime() - sonnoMin * 60000);
+    const aLetto       = new Date(addormentato.getTime() - BUFFER_MIN * 60000);
+    const vaiADormire  = new Date(aLetto.getTime() - (lettura + CANE_MIN + CUCINA_MIN) * 60000);
+
+    result.textContent = hhmm(vaiADormire);
+
+    // Countdown e semaforo rispetto ad adesso
+    const now = new Date();
+    const diffMin = Math.round((vaiADormire - now) / 60000);
+    let cls, subTxt;
+    if (diffMin <= 0) {
+      // L'ora di coricarsi e' gia' passata: dormiresti meno del desiderato
+      cls = 'red';
+      const late = Math.abs(diffMin);
+      subTxt = `in ritardo di ${Math.floor(late / 60)}h ${String(late % 60).padStart(2, '0')}m`;
     } else {
-      const totalMin = Math.floor(effectiveMs / 60000);
-      const hours = Math.floor(totalMin / 60);
-      const mins = totalMin % 60;
-      cd.textContent = `${hours}h ${String(mins).padStart(2, '0')}m`;
-      cd.className = 'countdown ' +
-        (hours >= 7 ? 'green' : hours >= 5 ? 'yellow' : 'red');
+      cls = diffMin <= SOGLIA_GIALLO_MIN ? 'yellow' : 'green';
+      subTxt = `tra ${Math.floor(diffMin / 60)}h ${String(diffMin % 60).padStart(2, '0')}m`;
     }
-    info.textContent = `Sveglia: ${fmtWeekday(wake)} ${String(wake.getHours()).padStart(2,'0')}:${String(wake.getMinutes()).padStart(2,'0')}`;
+    result.className = 'result ' + cls;
+    sub.textContent = subTxt;
+
+    // Riepilogo: sveglia, sonno e orari intermedi
+    const sonnoTxt = sonnoMin % 60 === 0
+      ? `${sonnoMin / 60}h`
+      : `${Math.floor(sonnoMin / 60)}h${String(sonnoMin % 60).padStart(2, '0')}`;
+    info.innerHTML = `Sveglia <b>${wd(wake)} ${hhmm(wake)}</b> &middot; dormi ${sonnoTxt}<br>` +
+                     `a letto ${hhmm(aLetto)} &middot; addormentato ${hhmm(addormentato)}`;
   }
 
-  hourSel.addEventListener('change', () => { persist(); tick(); });
-  minSel.addEventListener('change',  () => { persist(); tick(); });
+  [wakeH, wakeM, sleepH, sleepM].forEach(el =>
+    el.addEventListener('change', () => { persist(); tick(); }));
+  reading.addEventListener('input', () => { persist(); tick(); });
 
   tick();
   setInterval(tick, 1000);
