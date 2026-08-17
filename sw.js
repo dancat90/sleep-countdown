@@ -1,4 +1,4 @@
-const CACHE = 'sleep-countdown-v2';
+const CACHE = 'sleep-countdown-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -13,9 +13,16 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
+  // Pulizia SOLO delle cache col proprio prefisso: sull'origin
+  // dancat90.github.io convivono anche meteo-rotta e meteo-trek,
+  // il filtro generico cancellerebbe il loro offline.
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((k) => k.startsWith('sleep-countdown-') && k !== CACHE)
+          .map((k) => caches.delete(k))
+      )
     )
   );
   self.clients.claim();
