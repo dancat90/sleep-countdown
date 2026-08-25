@@ -85,6 +85,27 @@
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .colon { color: #c9d1d9; font-weight: 700; font-size: 1.05rem; }
+  /* Spunte attivita' serali: se disattivate, il tempo relativo non viene sottratto */
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: #8b949e;
+    cursor: pointer;
+    user-select: none;
+  }
+  .check input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: #58a6ff;
+    cursor: pointer;
+  }
+  .check .mins { color: #6e7681; font-size: 0.82rem; }
+  .row.extras { justify-content: space-around; }
+  .row.off .check, .row.off .unit { color: #484f58; }
+  .row.off input[type="number"] { color: #484f58; border-color: #21262d; }
   .unit { color: #6e7681; font-size: 0.82rem; }
   .result {
     font-size: 4.6rem;
@@ -108,6 +129,7 @@
     text-align: center;
   }
   .info {
+    max-width: 100%;
     font-size: 0.9rem;
     color: #c9d1d9;
     margin-bottom: 5px;
@@ -115,6 +137,7 @@
     line-height: 1.5;
   }
   .buffer {
+    max-width: 100%;
     font-size: 0.75rem;
     color: #6e7681;
     font-style: italic;
@@ -151,19 +174,23 @@
         <select id="sleepM" aria-label="Minuti di sonno"></select>
       </div>
     </div>
-    <div class="row">
-      <label>Lettura</label>
+    <div class="row" id="rowReading">
+      <label class="check"><input id="readingOn" type="checkbox" checked aria-label="Includi lettura" />Lettura</label>
       <div class="group">
         <input id="reading" type="number" min="0" step="5" inputmode="numeric" aria-label="Minuti di lettura" />
         <span class="unit">min</span>
       </div>
+    </div>
+    <div class="row extras">
+      <label class="check"><input id="caneOn" type="checkbox" checked aria-label="Includi passeggiata cane" />Cane <span class="mins">+20</span></label>
+      <label class="check"><input id="cucinaOn" type="checkbox" checked aria-label="Includi cucina e igiene" />Cucina/igiene <span class="mins">+15</span></label>
     </div>
   </div>
 
   <div class="result idle" id="result">--:--</div>
   <div class="sub" id="sub">Imposta i dati</div>
   <div class="info" id="info"></div>
-  <div class="buffer">+15 addormentamento &middot; +20 cane &middot; +15 cucina/igiene</div>
+  <div class="buffer" id="buffer"></div>
 
   <div class="footer">Ora di coricarti calcolata a ritroso dalla sveglia</div>
 
@@ -180,6 +207,10 @@
   const sleepH  = document.getElementById('sleepH');
   const sleepM  = document.getElementById('sleepM');
   const reading = document.getElementById('reading');
+  const readingOn = document.getElementById('readingOn');
+  const caneOn    = document.getElementById('caneOn');
+  const cucinaOn  = document.getElementById('cucinaOn');
+  const buffer    = document.getElementById('buffer');
   const result  = document.getElementById('result');
   const sub     = document.getElementById('sub');
   const info    = document.getElementById('info');
@@ -204,6 +235,9 @@
     wakeH.value = saved.wakeH; wakeM.value = saved.wakeM;
     sleepH.value = saved.sleepH; sleepM.value = saved.sleepM;
     reading.value = saved.reading;
+    readingOn.checked = saved.readingOn !== false;
+    caneOn.checked    = saved.caneOn !== false;
+    cucinaOn.checked  = saved.cucinaOn !== false;
   } else {
     wakeH.value = 7; wakeM.value = 0;
     sleepH.value = 8; sleepM.value = 0;
@@ -215,6 +249,9 @@
       wakeH: wakeH.value, wakeM: wakeM.value,
       sleepH: sleepH.value, sleepM: sleepM.value,
       reading: reading.value,
+      readingOn: readingOn.checked,
+      caneOn: caneOn.checked,
+      cucinaOn: cucinaOn.checked,
     }));
   }
 
@@ -231,7 +268,10 @@
   const wd   = d => d.toLocaleDateString('it-IT', { weekday: 'short' });
 
   function tick() {
-    const lettura  = Math.max(0, parseInt(reading.value, 10) || 0);
+    // Attivita' serali: ogni spunta disattivata azzera il proprio tempo (i minuti di lettura restano memorizzati)
+    const lettura  = readingOn.checked ? Math.max(0, parseInt(reading.value, 10) || 0) : 0;
+    const cane     = caneOn.checked   ? CANE_MIN   : 0;
+    const cucina   = cucinaOn.checked ? CUCINA_MIN : 0;
     const sonnoMin = (+sleepH.value) * 60 + (+sleepM.value);
 
     /* Calcolo a ritroso dalla sveglia:
@@ -239,7 +279,7 @@
     const wake         = nextWake();
     const addormentato = new Date(wake.getTime() - sonnoMin * 60000);
     const aLetto       = new Date(addormentato.getTime() - BUFFER_MIN * 60000);
-    const vaiADormire  = new Date(aLetto.getTime() - (lettura + CANE_MIN + CUCINA_MIN) * 60000);
+    const vaiADormire  = new Date(aLetto.getTime() - (lettura + cane + cucina) * 60000);
 
     result.textContent = hhmm(vaiADormire);
 
@@ -265,9 +305,18 @@
       : `${Math.floor(sonnoMin / 60)}h${String(sonnoMin % 60).padStart(2, '0')}`;
     info.innerHTML = `Sveglia <b>${wd(wake)} ${hhmm(wake)}</b> &middot; dormi ${sonnoTxt}<br>` +
                      `a letto ${hhmm(aLetto)} &middot; addormentato ${hhmm(addormentato)}`;
+
+    // Riga dei tempi sottratti: mostra solo le voci attive
+    const parti = [`+${BUFFER_MIN} addormentamento`];
+    if (readingOn.checked) parti.push(`+${lettura} lettura`);
+    if (caneOn.checked)    parti.push(`+${CANE_MIN} cane`);
+    if (cucinaOn.checked)  parti.push(`+${CUCINA_MIN} cucina/igiene`);
+    buffer.innerHTML = parti.join(' &middot; ');
+    reading.disabled = !readingOn.checked;
+    document.getElementById('rowReading').classList.toggle('off', !readingOn.checked);
   }
 
-  [wakeH, wakeM, sleepH, sleepM].forEach(el =>
+  [wakeH, wakeM, sleepH, sleepM, readingOn, caneOn, cucinaOn].forEach(el =>
     el.addEventListener('change', () => { persist(); tick(); }));
   reading.addEventListener('input', () => { persist(); tick(); });
 
