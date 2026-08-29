@@ -38,7 +38,7 @@
   .subtitle {
     font-size: 0.85rem;
     color: #6e7681;
-    margin-bottom: 28px;
+    margin-bottom: 20px;
     text-align: center;
   }
   .controls {
@@ -49,9 +49,32 @@
     padding: 16px 18px;
     border-radius: 14px;
     border: 1px solid #21262d;
-    margin-bottom: 30px;
+    margin-bottom: 12px;
     width: 100%;
     max-width: 340px;
+  }
+  /* Tasto di commutazione fra calcolo a ritroso (dalla sveglia) e
+     calcolo in avanti (dall'ora attuale) */
+  .btn-mode {
+    width: 100%;
+    max-width: 340px;
+    margin-bottom: 24px;
+    padding: 13px 16px;
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn-mode:active { background: #30363d; }
+  .btn-mode.on {
+    background: #1f6feb;
+    border-color: #1f6feb;
+    color: #ffffff;
   }
   .row {
     display: flex;
@@ -104,8 +127,9 @@
   }
   .check .mins { color: #6e7681; font-size: 0.82rem; }
   .row.extras { justify-content: space-around; }
-  .row.off .check, .row.off .unit { color: #484f58; }
-  .row.off input[type="number"] { color: #484f58; border-color: #21262d; }
+  /* Riga spenta: input escluso dal calcolo corrente, resta visibile ma attenuato */
+  .row.off .check, .row.off .unit, .row.off > label { color: #484f58; }
+  .row.off input[type="number"], .row.off select { color: #484f58; border-color: #21262d; }
   .unit { color: #6e7681; font-size: 0.82rem; }
   .result {
     font-size: 4.6rem;
@@ -155,10 +179,10 @@
 </head>
 <body>
   <h1>🌙 A che ora dormire</h1>
-  <div class="subtitle">L'ora per coricarti e dormire quanto vuoi</div>
+  <div class="subtitle" id="subtitle">L'ora per coricarti e dormire quanto vuoi</div>
 
   <div class="controls">
-    <div class="row">
+    <div class="row" id="rowWake">
       <label>Sveglia</label>
       <div class="group">
         <select id="wakeH" aria-label="Ora sveglia"></select>
@@ -187,12 +211,14 @@
     </div>
   </div>
 
+  <button class="btn-mode" id="btnMode" type="button">Vado a dormire ora &rarr;</button>
+
   <div class="result idle" id="result">--:--</div>
   <div class="sub" id="sub">Imposta i dati</div>
   <div class="info" id="info"></div>
   <div class="buffer" id="buffer"></div>
 
-  <div class="footer">Ora di coricarti calcolata a ritroso dalla sveglia</div>
+  <div class="footer" id="footer">Ora di coricarti calcolata a ritroso dalla sveglia</div>
 
 <script>
   /* === Tempi fissi (minuti) — modificabili qui === */
@@ -214,6 +240,17 @@
   const result  = document.getElementById('result');
   const sub     = document.getElementById('sub');
   const info    = document.getElementById('info');
+  const btnMode    = document.getElementById('btnMode');
+  const subtitle   = document.getElementById('subtitle');
+  const footer     = document.getElementById('footer');
+  const rowWake    = document.getElementById('rowWake');
+  const rowReading = document.getElementById('rowReading');
+
+  /* Due modi di calcolo:
+     false = a ritroso, dalla sveglia ricava l'ora di coricarsi (default)
+     true  = in avanti, dall'ora attuale ricava l'ora della sveglia
+     Il modo non viene memorizzato: all'apertura si riparte sempre a ritroso. */
+  let modoAvanti = false;
 
   // Popola un <select> con un range numerico, opzionalmente con padding a 2 cifre
   function fill(sel, from, to, step, pad) {
@@ -267,60 +304,105 @@
   const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const wd   = d => d.toLocaleDateString('it-IT', { weekday: 'short' });
 
+  // Durata in minuti formattata come "3h 05m"
+  const durata = min => `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`;
+
+  // Sonno desiderato formattato come "8h" oppure "7h30"
+  const sonnoTesto = min => min % 60 === 0
+    ? `${min / 60}h`
+    : `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
+
   function tick() {
     // Attivita' serali: ogni spunta disattivata azzera il proprio tempo (i minuti di lettura restano memorizzati)
     const lettura  = readingOn.checked ? Math.max(0, parseInt(reading.value, 10) || 0) : 0;
     const cane     = caneOn.checked   ? CANE_MIN   : 0;
     const cucina   = cucinaOn.checked ? CUCINA_MIN : 0;
+    const attivita = lettura + cane + cucina;   // routine serale, prima di spegnere la luce
     const sonnoMin = (+sleepH.value) * 60 + (+sleepM.value);
 
-    /* Calcolo a ritroso dalla sveglia:
-       sveglia -> addormentato -> a letto (luci spente) -> ora di coricarsi (inizio routine) */
-    const wake         = nextWake();
-    const addormentato = new Date(wake.getTime() - sonnoMin * 60000);
-    const aLetto       = new Date(addormentato.getTime() - BUFFER_MIN * 60000);
-    const vaiADormire  = new Date(aLetto.getTime() - (lettura + cane + cucina) * 60000);
+    if (modoAvanti) renderAvanti(attivita, sonnoMin);
+    else            renderRitroso(attivita, sonnoMin);
 
-    result.textContent = hhmm(vaiADormire);
-
-    // Countdown e semaforo rispetto ad adesso
-    const now = new Date();
-    const diffMin = Math.round((vaiADormire - now) / 60000);
-    let cls, subTxt;
-    if (diffMin <= 0) {
-      // L'ora di coricarsi e' gia' passata: dormiresti meno del desiderato
-      cls = 'red';
-      const late = Math.abs(diffMin);
-      subTxt = `in ritardo di ${Math.floor(late / 60)}h ${String(late % 60).padStart(2, '0')}m`;
-    } else {
-      cls = diffMin <= SOGLIA_GIALLO_MIN ? 'yellow' : 'green';
-      subTxt = `tra ${Math.floor(diffMin / 60)}h ${String(diffMin % 60).padStart(2, '0')}m`;
-    }
-    result.className = 'result ' + cls;
-    sub.textContent = subTxt;
-
-    // Riepilogo: sveglia, sonno e orari intermedi
-    const sonnoTxt = sonnoMin % 60 === 0
-      ? `${sonnoMin / 60}h`
-      : `${Math.floor(sonnoMin / 60)}h${String(sonnoMin % 60).padStart(2, '0')}`;
-    info.innerHTML = `Sveglia <b>${wd(wake)} ${hhmm(wake)}</b> &middot; dormi ${sonnoTxt}<br>` +
-                     `a letto ${hhmm(aLetto)} &middot; addormentato ${hhmm(addormentato)}`;
-
-    // Riga dei tempi sottratti: mostra solo le voci attive
+    // Riga dei tempi conteggiati: mostra solo le voci attive
     const parti = [`+${BUFFER_MIN} addormentamento`];
     if (readingOn.checked) parti.push(`+${lettura} lettura`);
     if (caneOn.checked)    parti.push(`+${CANE_MIN} cane`);
     if (cucinaOn.checked)  parti.push(`+${CUCINA_MIN} cucina/igiene`);
     buffer.innerHTML = parti.join(' &middot; ');
     reading.disabled = !readingOn.checked;
-    document.getElementById('rowReading').classList.toggle('off', !readingOn.checked);
+    rowReading.classList.toggle('off', !readingOn.checked);
+  }
+
+  /* Modo a ritroso — dalla sveglia all'ora di coricarsi:
+     sveglia -> addormentato -> a letto (luci spente) -> inizio routine serale */
+  function renderRitroso(attivita, sonnoMin) {
+    const wake         = nextWake();
+    const addormentato = new Date(wake.getTime() - sonnoMin * 60000);
+    const aLetto       = new Date(addormentato.getTime() - BUFFER_MIN * 60000);
+    const vaiADormire  = new Date(aLetto.getTime() - attivita * 60000);
+
+    result.textContent = hhmm(vaiADormire);
+
+    // Countdown e semaforo rispetto ad adesso
+    const diffMin = Math.round((vaiADormire - new Date()) / 60000);
+    let cls, subTxt;
+    if (diffMin <= 0) {
+      // L'ora di coricarsi e' gia' passata: dormiresti meno del desiderato
+      cls = 'red';
+      subTxt = `in ritardo di ${durata(Math.abs(diffMin))}`;
+    } else {
+      cls = diffMin <= SOGLIA_GIALLO_MIN ? 'yellow' : 'green';
+      subTxt = `tra ${durata(diffMin)}`;
+    }
+    result.className = 'result ' + cls;
+    sub.textContent = subTxt;
+
+    info.innerHTML = `Sveglia <b>${wd(wake)} ${hhmm(wake)}</b> &middot; dormi ${sonnoTesto(sonnoMin)}<br>` +
+                     `a letto ${hhmm(aLetto)} &middot; addormentato ${hhmm(addormentato)}`;
+  }
+
+  /* Modo in avanti — dall'ora attuale all'ora della sveglia:
+     adesso (inizio routine) -> a letto -> addormentato -> sveglia
+     Nessun semaforo: qui non esiste un ritardo da segnalare. */
+  function renderAvanti(attivita, sonnoMin) {
+    const now          = new Date();
+    const aLetto       = new Date(now.getTime() + attivita * 60000);
+    const addormentato = new Date(aLetto.getTime() + BUFFER_MIN * 60000);
+    const sveglia      = new Date(addormentato.getTime() + sonnoMin * 60000);
+
+    result.textContent = hhmm(sveglia);
+    result.className = 'result';
+    sub.textContent = `sveglia di ${wd(sveglia)} · fra ${durata(Math.round((sveglia - now) / 60000))}`;
+
+    info.innerHTML = `Inizi adesso <b>${hhmm(now)}</b> &middot; dormi ${sonnoTesto(sonnoMin)}<br>` +
+                     `a letto ${hhmm(aLetto)} &middot; addormentato ${hhmm(addormentato)}`;
+  }
+
+  // Commuta fra i due modi e adatta testi e campi attivi
+  function setModo(avanti) {
+    modoAvanti = avanti;
+    btnMode.innerHTML = avanti ? '&larr; Torna all’ora di coricarti'
+                               : 'Vado a dormire ora &rarr;';
+    btnMode.classList.toggle('on', avanti);
+    subtitle.textContent = avanti
+      ? 'A che ora suonare la sveglia, se ti corichi adesso'
+      : 'L’ora per coricarti e dormire quanto vuoi';
+    footer.textContent = avanti
+      ? 'Sveglia calcolata in avanti dall’ora attuale'
+      : 'Ora di coricarti calcolata a ritroso dalla sveglia';
+    // In avanti la sveglia e' il risultato: i suoi campi non entrano nel calcolo
+    rowWake.classList.toggle('off', avanti);
+    wakeH.disabled = avanti;
+    wakeM.disabled = avanti;
+    tick();
   }
 
   [wakeH, wakeM, sleepH, sleepM, readingOn, caneOn, cucinaOn].forEach(el =>
     el.addEventListener('change', () => { persist(); tick(); }));
   reading.addEventListener('input', () => { persist(); tick(); });
+  btnMode.addEventListener('click', () => setModo(!modoAvanti));
 
-  tick();
+  setModo(false);
   setInterval(tick, 1000);
 
   // Tieni schermo acceso se possibile (su PWA installata)
