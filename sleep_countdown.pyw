@@ -57,6 +57,9 @@ RINVIO_MIN = 15                   # durata di un rinvio
 SOGLIE_AVVISO_MIN = (30, 10, 1)   # a queste soglie: notifica + countdown in primo piano
 CORREZIONE_MAX_MIN = 120          # correzione ammessa: da -120 a +120 minuti
 GAP_MAX_S = 30                    # salto oltre questo fra due tick = PC sospeso o spento
+COUNTDOWN_DIM = 12                # dimensione predefinita del countdown (punti)
+COUNTDOWN_DIM_MIN = 8             # limiti della regolazione con la rotellina
+COUNTDOWN_DIM_MAX = 32
 
 # === Palette (coerente con la web app) ===
 BG = "#0d1117"
@@ -70,9 +73,7 @@ COL_INFO = "#58a6ff"
 CAMPO_BG = "#161b22"
 BORDO = "#30363d"
 BTN_BG = "#21262d"
-# Sfondi del countdown, con le soglie di Shutdown Timer Classic
-CD_VERDE = "#238636"
-CD_GIALLO = "#d29922"
+# Colori del countdown oltre a quelli della palette (soglie di Shutdown Timer Classic)
 CD_ARANCIO = "#db6d28"
 CD_ROSSO = "#da3633"
 
@@ -135,6 +136,7 @@ def impostazioni_predefinite() -> dict:
             "prova": False,
         },
         "countdown_pos": None,
+        "countdown_dim": COUNTDOWN_DIM,
         # Chiave = data della sveglia: {"rinvii": n, "annullata": bool, "eseguita": bool}
         "serate": {},
     }
@@ -180,6 +182,7 @@ def carica_impostazioni(percorso: str | None = None) -> dict:
     if sp["azione"] not in AZIONI:
         sp["azione"] = "Spegni"
     sp["correzione_min"] = max(-CORREZIONE_MAX_MIN, min(CORREZIONE_MAX_MIN, sp["correzione_min"]))
+    imp["countdown_dim"] = max(COUNTDOWN_DIM_MIN, min(COUNTDOWN_DIM_MAX, imp["countdown_dim"]))
     if not 0 <= imp["sonno_h"] <= 23:
         imp["sonno_h"] = 8
     if not 0 <= imp["sonno_m"] <= 59:
@@ -275,13 +278,14 @@ def formatta_orologio(secondi: float) -> str:
 
 
 def colori_countdown(secondi: float, fase: bool = False) -> tuple[str, str]:
-    """(sfondo, testo): verde > 30', giallo > 10', arancio > 1', poi rosso/nero lampeggiante."""
+    """(sfondo, testo) in versione discreta: sfondo scuro e testo verde > 30',
+    giallo > 10', arancio > 1', poi sfondo rosso lampeggiante nell'ultimo minuto."""
     if secondi > 30 * 60:
-        return CD_VERDE, "#ffffff"
+        return BG, COL_OK
     if secondi > 10 * 60:
-        return CD_GIALLO, BG
+        return BG, COL_WARN
     if secondi > 60:
-        return CD_ARANCIO, BG
+        return BG, CD_ARANCIO
     return (BG, CD_ROSSO) if fase else (CD_ROSSO, "#ffffff")
 
 
@@ -515,7 +519,11 @@ def disegna_icona(colore: str):
 # ======================================================================
 
 class FinestraCountdown:
-    """Countdown senza bordi, sempre in primo piano, trascinabile; colore per soglia."""
+    """Countdown compatto su una riga: senza bordi, sempre in primo piano, trascinabile.
+
+    Rotellina = dimensione (memorizzata), doppio clic = finestra principale,
+    tasto destro = menu con rinvio, annullo e nascondi.
+    """
 
     def __init__(self, app: "SonnoApp") -> None:
         self.app = app
@@ -526,30 +534,37 @@ class FinestraCountdown:
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
 
-        self.frame = tk.Frame(self.win, padx=14, pady=8, highlightthickness=1,
+        self.frame = tk.Frame(self.win, bg=BG, padx=8, pady=1, highlightthickness=1,
                               highlightbackground=BORDO)
         self.frame.pack(fill="both", expand=True)
-        self.lbl_titolo = tk.Label(self.frame, font=("Segoe UI", 9, "bold"))
-        self.lbl_titolo.pack()
-        self.lbl_tempo = tk.Label(self.frame, font=("Segoe UI", 28, "bold"), width=9)
-        self.lbl_tempo.pack()
-        self.lbl_info = tk.Label(self.frame, font=("Segoe UI", 9))
-        self.lbl_info.pack()
-        self._pulsanti = tk.Frame(self.frame)
-        self._pulsanti.pack(pady=(6, 0))
-        self.btn_rinvia = _bottone(self._pulsanti, f"Rinvia {RINVIO_MIN}'", app.rinvia)
-        self.btn_annulla = _bottone(self._pulsanti, "Annulla stasera", app.annulla_o_ferma)
-        self.btn_nascondi = _bottone(self._pulsanti, "Nascondi", self.nascondi)
-        for bottone in (self.btn_rinvia, self.btn_annulla, self.btn_nascondi):
-            bottone.pack(side="left", padx=3)
+        self.lbl_titolo = tk.Label(self.frame, bg=BG, fg=FG_MUTED)
+        self.lbl_titolo.pack(side="left", padx=(0, 6))
+        self.lbl_tempo = tk.Label(self.frame, bg=BG)
+        self.lbl_tempo.pack(side="left")
+        self._applica_dimensione()
 
-        # Trascinamento col tasto sinistro, doppio clic = finestra principale, destro = menu
-        for w in (self.frame, self.lbl_titolo, self.lbl_tempo, self.lbl_info):
+        # Trascinamento col tasto sinistro, doppio clic = finestra principale,
+        # destro = menu, rotellina = dimensione
+        for w in (self.frame, self.lbl_titolo, self.lbl_tempo):
             w.bind("<ButtonPress-1>", self._inizio_drag)
             w.bind("<B1-Motion>", self._trascina)
             w.bind("<ButtonRelease-1>", self._fine_drag)
             w.bind("<Double-Button-1>", lambda _e: app.mostra_finestra())
             w.bind("<Button-3>", self._menu_contestuale)
+            w.bind("<MouseWheel>", self._rotellina)
+
+    def _applica_dimensione(self) -> None:
+        dimensione = self.app.imp["countdown_dim"]
+        self.lbl_tempo.config(font=("Segoe UI", dimensione, "bold"))
+        self.lbl_titolo.config(font=("Segoe UI", max(7, round(dimensione * 0.7))))
+
+    def _rotellina(self, evento) -> None:
+        passo = 1 if evento.delta > 0 else -1
+        nuova = max(COUNTDOWN_DIM_MIN,
+                    min(COUNTDOWN_DIM_MAX, self.app.imp["countdown_dim"] + passo))
+        if nuova != self.app.imp["countdown_dim"]:
+            self.app.memorizza_dim_countdown(nuova)
+            self._applica_dimensione()
 
     def mostra(self) -> None:
         if not self.visibile:
@@ -566,17 +581,12 @@ class FinestraCountdown:
             self.win.withdraw()
             self.visibile = False
 
-    def aggiorna(self, secondi, titolo, info, puo_rinviare, testo_annulla, fase) -> None:
+    def aggiorna(self, secondi, titolo, fase) -> None:
         sfondo, testo = colori_countdown(secondi, fase)
-        for w in (self.frame, self._pulsanti):
-            w.config(bg=sfondo)
-        for w in (self.lbl_titolo, self.lbl_tempo, self.lbl_info):
-            w.config(bg=sfondo, fg=testo)
-        self.lbl_titolo.config(text=titolo)
-        self.lbl_tempo.config(text=formatta_orologio(secondi))
-        self.lbl_info.config(text=info)
-        self.btn_rinvia.config(state="normal" if puo_rinviare else "disabled")
-        self.btn_annulla.config(text=testo_annulla)
+        # Bordo nel colore della soglia; titolo attenuato tranne nel lampeggio rosso
+        self.frame.config(bg=sfondo, highlightbackground=testo)
+        self.lbl_titolo.config(bg=sfondo, text=titolo, fg=FG_MUTED if sfondo == BG else testo)
+        self.lbl_tempo.config(bg=sfondo, fg=testo, text=formatta_orologio(secondi))
 
     def porta_vicino_al_mouse(self) -> None:
         """Se il countdown sta su un monitor diverso da quello del mouse, lo porta li'."""
@@ -1080,6 +1090,10 @@ class SonnoApp:
         self.imp["countdown_pos"] = [int(x), int(y)]
         self._da_salvare = True
 
+    def memorizza_dim_countdown(self, dimensione: int) -> None:
+        self.imp["countdown_dim"] = int(dimensione)
+        self._da_salvare = True
+
     # ------------------------------------------------------------------
     # Calcolo dello stato e regola di scatto
     # ------------------------------------------------------------------
@@ -1304,10 +1318,8 @@ class SonnoApp:
 
         # Countdown: contenuto aggiornato prima di mostrarlo (la posizione dipende dalla misura)
         if armato and (self.countdown.visibile or self._mostra_cd):
-            titolo = f"{stato.azione} alle {stato.target:%H:%M}" + (" · prova" if sp["prova"] else "")
-            info = "timer manuale" if manuale else f"rinvii {stato.rinvii}/{MAX_RINVII}"
-            self.countdown.aggiorna(rimasti, titolo, info, self._puo_rinviare,
-                                    self._etichetta_annulla_cd, self._fase)
+            titolo = f"{stato.azione} {stato.target:%H:%M}" + (" · prova" if sp["prova"] else "")
+            self.countdown.aggiorna(rimasti, titolo, self._fase)
             if self._mostra_cd:
                 self.countdown.mostra()
         elif not armato:

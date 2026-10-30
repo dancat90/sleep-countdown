@@ -90,10 +90,10 @@ verifica(m.formatta_durata(3900) == "1h 05m", "durata 1h 05m")
 verifica(m.formatta_durata(90000) == "1g 01h 00m", "durata 1g 01h")
 verifica(m.formatta_orologio(39.2) == "0:00:40", "orologio arrotondato per eccesso")
 verifica(m.formatta_orologio(3661) == "1:01:01", "orologio 1:01:01")
-verifica(m.colori_countdown(31 * 60)[0] == m.CD_VERDE, "colore verde oltre 30'")
-verifica(m.colori_countdown(30 * 60)[0] == m.CD_GIALLO, "colore giallo a 30'")
-verifica(m.colori_countdown(61)[0] == m.CD_ARANCIO, "colore arancio sopra 1'")
-verifica(m.colori_countdown(60)[0] == m.CD_ROSSO, "colore rosso a 1'")
+verifica(m.colori_countdown(31 * 60) == (m.BG, m.COL_OK), "testo verde oltre 30' su sfondo scuro")
+verifica(m.colori_countdown(30 * 60) == (m.BG, m.COL_WARN), "testo giallo a 30'")
+verifica(m.colori_countdown(61) == (m.BG, m.CD_ARANCIO), "testo arancio sopra 1'")
+verifica(m.colori_countdown(60)[0] == m.CD_ROSSO, "sfondo rosso nell'ultimo minuto")
 verifica(m.colori_countdown(30, True) == (m.BG, m.CD_ROSSO), "lampeggio rosso/nero")
 
 imp = m.impostazioni_predefinite()
@@ -108,11 +108,12 @@ with open(m.FILE_IMPOSTAZIONI, "w", encoding="utf-8") as f:
 verifica(m.carica_impostazioni() == m.impostazioni_predefinite(), "file rotto -> predefinite")
 with open(m.FILE_IMPOSTAZIONI, "w", encoding="utf-8") as f:
     f.write('{"sonno_h": "otto", "spegnimento": {"azione": "Esplodi", "correzione_min": 999},'
-            ' "sveglie": {"2": {"ora": "99:99"}}, "countdown_pos": [1, "x"]}')
+            ' "sveglie": {"2": {"ora": "99:99"}}, "countdown_pos": [1, "x"], "countdown_dim": 99}')
 cattive = m.carica_impostazioni()
 verifica(cattive["sonno_h"] == 8 and cattive["spegnimento"]["azione"] == "Spegni"
          and cattive["spegnimento"]["correzione_min"] == 120
-         and cattive["sveglie"]["2"]["ora"] == "07:00" and cattive["countdown_pos"] is None,
+         and cattive["sveglie"]["2"]["ora"] == "07:00" and cattive["countdown_pos"] is None
+         and cattive["countdown_dim"] == m.COUNTDOWN_DIM_MAX,
          "valori sbagliati -> ripuliti")
 
 a = m.IstanzaSingola("SonnoTestIstanza")
@@ -300,6 +301,23 @@ def p_riattivata():
     verifica(serata(chiave2).get("annullata") is False, "serata riattivata")
     verifica(app.countdown.visibile, "countdown di nuovo visibile dopo la riattivazione")
     scatta("05_riattivato.png", app.countdown.win)
+    # Rotellina: dimensione su e giu', limiti rispettati, valore da salvare
+    class Rotella:
+        def __init__(self, delta):
+            self.delta = delta
+    base = app.imp["countdown_dim"]
+    larghezza = app.countdown.win.winfo_reqwidth()
+    app.countdown._rotellina(Rotella(120))
+    app.countdown.win.update_idletasks()
+    verifica(app.imp["countdown_dim"] == base + 1 and app._da_salvare,
+             "rotellina in su: countdown piu' grande, da salvare")
+    verifica(app.countdown.win.winfo_reqwidth() > larghezza, "la finestra cresce davvero")
+    for _ in range(40):
+        app.countdown._rotellina(Rotella(-120))
+    verifica(app.imp["countdown_dim"] == m.COUNTDOWN_DIM_MIN, "rotellina in giu': minimo rispettato")
+    scatta("05b_countdown_minimo.png", app.countdown.win)
+    app.memorizza_dim_countdown(base)
+    app.countdown._applica_dimensione()
     # Sveglia del giorno spenta: lo spegnimento slitta alla sera dopo
     giorno = (T + timedelta(days=2)).weekday()
     app.imposta_sveglia(giorno, False, "07:00")
