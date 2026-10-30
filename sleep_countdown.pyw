@@ -393,10 +393,48 @@ class IstanzaSingola:
         self._evento = self._mutex = None
 
 
-def _schermo_virtuale() -> tuple[int, int, int, int]:
-    """(x, y, larghezza, altezza) dell'insieme di tutti i monitor."""
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+def _user32():
     u32 = ctypes.WinDLL("user32")
-    return tuple(u32.GetSystemMetrics(i) for i in (76, 77, 78, 79))
+    u32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+    u32.MonitorFromPoint.restype = wintypes.HMONITOR
+    u32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
+    u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    return u32
+
+
+def monitor_di(x: int, y: int, nullo_se_fuori: bool = False):
+    """(handle, area di lavoro) del monitor che contiene il punto.
+
+    Con nullo_se_fuori=True ritorna None se il punto non cade su nessun monitor
+    (es. nel vuoto fra monitor di scala diversa); altrimenti usa il piu' vicino.
+    """
+    u32 = _user32()
+    handle = u32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 0 if nullo_se_fuori else 2)
+    if not handle:
+        return None
+    info = _MONITORINFO()
+    info.cbSize = ctypes.sizeof(info)
+    if not u32.GetMonitorInfoW(handle, ctypes.byref(info)):
+        return None
+    r = info.rcWork
+    return handle, (r.left, r.top, r.right, r.bottom)
+
+
+def posizione_mouse() -> tuple[int, int]:
+    punto = wintypes.POINT()
+    _user32().GetCursorPos(ctypes.byref(punto))
+    return punto.x, punto.y
+
+
+def _angolo(area, w: int, h: int) -> tuple[int, int]:
+    """Angolo in basso a destra di un'area di lavoro (sopra la barra delle applicazioni)."""
+    sinistra, alto, destra, basso = area
+    return max(sinistra, destra - w - 16), max(alto, basso - h - 16)
 
 
 # ======================================================================
@@ -540,13 +578,28 @@ class FinestraCountdown:
         self.btn_rinvia.config(state="normal" if puo_rinviare else "disabled")
         self.btn_annulla.config(text=testo_annulla)
 
+    def porta_vicino_al_mouse(self) -> None:
+        """Se il countdown sta su un monitor diverso da quello del mouse, lo porta li'."""
+        self.win.update_idletasks()
+        w = max(self.win.winfo_width(), self.win.winfo_reqwidth())
+        h = max(self.win.winfo_height(), self.win.winfo_reqheight())
+        mouse = monitor_di(*posizione_mouse())
+        attuale = monitor_di(self.win.winfo_rootx() + w // 2, self.win.winfo_rooty() + h // 2)
+        if mouse is None or (attuale is not None and attuale[0] == mouse[0]):
+            return
+        x, y = _angolo(mouse[1], w, h)
+        self.win.geometry(f"+{x}+{y}")
+        self.app.memorizza_pos_countdown(x, y)
+
     def _posizione(self) -> tuple[int, int]:
-        """Ultima posizione salvata (riportata dentro i monitor) o angolo in basso a destra."""
+        """Ultima posizione salvata, se cade su un monitor; altrimenti angolo del primario."""
         w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
         pos = self.app.imp.get("countdown_pos")
-        if pos:
-            vx, vy, vw, vh = _schermo_virtuale()
-            return (max(vx, min(pos[0], vx + vw - w)), max(vy, min(pos[1], vy + vh - h)))
+        if pos and monitor_di(pos[0] + w // 2, pos[1] + h // 2, nullo_se_fuori=True):
+            return pos[0], pos[1]
+        primario = monitor_di(0, 0)
+        if primario:
+            return _angolo(primario[1], w, h)
         return (self.win.winfo_screenwidth() - w - 24, self.win.winfo_screenheight() - h - 72)
 
     def _inizio_drag(self, evento) -> None:
@@ -1315,6 +1368,10 @@ class SonnoApp:
         self._aggiorna()
         if not self.countdown.visibile:
             self._notifica("Nessun countdown attivo", self.stato_label.cget("text"))
+            return
+        # Richiesta esplicita: il countdown va dove l'utente sta guardando (monitor del mouse)
+        self.countdown.porta_vicino_al_mouse()
+        self.countdown.mostra()
 
     def rinvia(self) -> None:
         _, _, stato = self._calcola_stato(adesso())

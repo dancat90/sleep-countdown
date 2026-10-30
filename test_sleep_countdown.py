@@ -312,6 +312,60 @@ def p_riattivata():
     app.hour_var.set("07")
 
 
+def monitor_secondari():
+    """Aree di lavoro dei monitor non primari (lista vuota con un solo monitor)."""
+    from ctypes import wintypes
+    aree = []
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+                              ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+
+    def su_monitor(handle, _hdc, _rect, _lp):
+        info = m._MONITORINFO()
+        info.cbSize = ctypes.sizeof(info)
+        ctypes.windll.user32.GetMonitorInfoW(handle, ctypes.byref(info))
+        if not info.dwFlags & 1:
+            r = info.rcWork
+            aree.append((r.left, r.top, r.right, r.bottom))
+        return True
+
+    ctypes.windll.user32.EnumDisplayMonitors(None, None, proc(su_monitor), 0)
+    return aree
+
+
+@passo(300)
+def p_multi_monitor():
+    verifica(m.monitor_di(-10 ** 6, -10 ** 6, nullo_se_fuori=True) is None,
+             "punto fuori da tutti i monitor riconosciuto")
+    verifica(m.monitor_di(0, 0) is not None, "monitor primario trovato")
+    altri = monitor_secondari()
+    if not altri:
+        print("Un solo monitor: prova di spostamento saltata", flush=True)
+        return
+    # Countdown su un monitor secondario, mouse al centro del primario, clic su «Countdown»
+    sinistra, alto, _, _ = altri[0]
+    app.countdown.win.geometry(f"+{sinistra + 60}+{alto + 60}")
+    app.countdown.win.update()
+    primario = m.monitor_di(0, 0)
+    pl, pt, pr, pb = primario[1]
+    m.posizione_mouse = lambda: ((pl + pr) // 2, (pt + pb) // 2)
+    app.btn_countdown.invoke()
+    app.countdown.win.update()
+    x, y = app.countdown.win.winfo_rootx(), app.countdown.win.winfo_rooty()
+    verifica(app.countdown.visibile and m.monitor_di(x + 10, y + 10)[0] == primario[0],
+             "«Countdown» riporta il countdown sul monitor del mouse")
+    verifica(app.imp["countdown_pos"] == [app.countdown.win.winfo_x(), app.countdown.win.winfo_y()],
+             "nuova posizione memorizzata")
+    # Posizione salvata nel vuoto fuori dai monitor: alla prossima comparsa torna sul primario
+    app.countdown.nascondi()
+    app.imp["countdown_pos"] = [-10 ** 6, -10 ** 6]
+    app.mostra_countdown()
+    app.countdown.win.update()
+    x, y = app.countdown.win.winfo_rootx(), app.countdown.win.winfo_rooty()
+    verifica(m.monitor_di(x + 10, y + 10, nullo_se_fuori=True) is not None,
+             "posizione salvata non valida: countdown di nuovo su un monitor")
+    scatta("09_countdown_riportato.png", app.countdown.win)
+
+
 @passo(300)
 def p_dialoghi():
     app.apri_settimana()
