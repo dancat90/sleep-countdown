@@ -689,6 +689,8 @@ class FinestraCountdown:
         menu.add_command(label="Apri finestra principale", command=self.app.mostra_finestra)
         menu.add_command(label=f"Rinvia {RINVIO_MIN} min", command=self.app.rinvia,
                          state="normal" if self.app._puo_rinviare else "disabled")
+        menu.add_command(label="Annulla un rinvio", command=self.app.annulla_rinvio,
+                         state="normal" if self.app._puo_annullare_rinvio else "disabled")
         menu.add_command(label=self.app._etichetta_annulla_cd, command=self.app.annulla_o_ferma)
         menu.add_separator()
         menu.add_command(label="Nascondi", command=self.nascondi)
@@ -889,6 +891,7 @@ class SonnoApp:
         self.modo_avanti = False
         # Stato letto dal menu dell'icona (thread di pystray): solo valori semplici
         self._puo_rinviare = False
+        self._puo_annullare_rinvio = False
         self._puo_annullare = False
         self._etichetta_annulla = "Annulla stasera"
         self._etichetta_annulla_cd = "Annulla stasera"
@@ -1059,6 +1062,8 @@ class SonnoApp:
             pystray.Menu.SEPARATOR,
             voce(f"Rinvia {RINVIO_MIN} min", lambda: comando("rinvia"),
                  enabled=lambda _v: self._puo_rinviare),
+            voce("Annulla un rinvio", lambda: comando("annulla_rinvio"),
+                 enabled=lambda _v: self._puo_annullare_rinvio),
             voce(lambda _v: self._etichetta_annulla, lambda: comando("annulla"),
                  enabled=lambda _v: self._puo_annullare),
             voce(lambda _v: "Ferma timer manuale" if self.manuale else "Timer manuale…",
@@ -1096,7 +1101,8 @@ class SonnoApp:
             if self.istanza and self.istanza.richiesta_mostra():
                 self.mostra_finestra()
             azioni = {"mostra": self.mostra_finestra, "countdown": self.mostra_countdown,
-                      "rinvia": self.rinvia, "annulla": self.toggle_annulla,
+                      "rinvia": self.rinvia, "annulla_rinvio": self.annulla_rinvio,
+                      "annulla": self.toggle_annulla,
                       "manuale": self.apri_timer_manuale, "esci": self.esci}
             while self._vivo:
                 try:
@@ -1425,6 +1431,7 @@ class SonnoApp:
 
         # Pulsanti: rinvio solo per la serata armata; annullo o riattivazione della serata
         self._puo_rinviare = stato.tipo == "sonno" and armato and stato.rinvii < MAX_RINVII
+        self._puo_annullare_rinvio = self._rinvio_annullabile(stato, now)
         if stato.esito == "annullata":
             self._etichetta_annulla = "Riattiva stasera"
             self._puo_annullare = stato.target is not None and stato.target > now
@@ -1469,8 +1476,8 @@ class SonnoApp:
         else:
             colore = COL_INFO
         titolo = ("Sonno e spegnimento\n" + testo)[:127]
-        menu = (self._puo_rinviare, self._puo_annullare, self._etichetta_annulla,
-                bool(self.manuale))
+        menu = (self._puo_rinviare, self._puo_annullare_rinvio, self._puo_annullare,
+                self._etichetta_annulla, bool(self.manuale))
         vecchia = self._firma_icona
         if vecchia == (colore, titolo, menu):
             return
@@ -1507,6 +1514,26 @@ class SonnoApp:
         # Richiesta esplicita: il countdown va dove l'utente sta guardando (monitor del mouse)
         self.countdown.porta_vicino_al_mouse()
         self.countdown.mostra()
+
+    @staticmethod
+    def _rinvio_annullabile(stato: Stato, now: datetime) -> bool:
+        """Un rinvio si annulla solo se l'orario che ne risulta resta nel futuro.
+
+        Margine di 1 minuto: un orario gia' passato farebbe saltare lo spegnimento
+        di stasera invece di anticiparlo.
+        """
+        if stato.tipo != "sonno" or stato.esito != "armato" or stato.rinvii <= 0:
+            return False
+        anticipato = stato.target - timedelta(minutes=RINVIO_MIN)
+        return anticipato > now + timedelta(minutes=1)
+
+    def annulla_rinvio(self) -> None:
+        """Toglie un rinvio della serata (un clic sbagliato su «Rinvia»)."""
+        _, _, stato = self._calcola_stato(adesso())
+        if not self._rinvio_annullabile(stato, adesso()):
+            return
+        self.imp["serate"].setdefault(stato.chiave, {})["rinvii"] = stato.rinvii - 1
+        self._modificato()
 
     def rinvia(self) -> None:
         _, _, stato = self._calcola_stato(adesso())

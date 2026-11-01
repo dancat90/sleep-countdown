@@ -142,6 +142,36 @@ def passo1():
     app.commuta_modo()
     verifica(not app.modo_avanti and str(app.sveglia_h_combo.cget("state")) == "readonly",
              "ritorno a ritroso: riga Sveglia di nuovo attiva")
+
+    # «Annulla un rinvio»: toglie un rinvio, mai oltre lo zero, mai verso il passato
+    def stato():
+        return app._calcola_stato(m.adesso())[2]
+
+    quindici = m.timedelta(minutes=m.RINVIO_MIN)
+    s0 = stato()
+    app.rinvia()
+    app.rinvia()
+    verifica(stato().rinvii == 2 and stato().target == s0.target + 2 * quindici, "due rinvii: +30 min")
+    verifica(app._puo_annullare_rinvio, "con rinvii: «Annulla un rinvio» attivo")
+    app.annulla_rinvio()
+    verifica(stato().rinvii == 1 and stato().target == s0.target + quindici, "annullato un rinvio: +15 min")
+    app.annulla_rinvio()
+    verifica(stato().rinvii == 0 and stato().target == s0.target, "annullati entrambi: orario originale")
+    verifica(not app._puo_annullare_rinvio, "senza rinvii: comando disattivo")
+    app.annulla_rinvio()
+    verifica(stato().rinvii == 0, "senza rinvii: nessun effetto")
+    app.rinvia()
+    s1 = stato()
+    reale = m.adesso
+    m.adesso = lambda: s1.target - m.timedelta(minutes=5)
+    try:
+        app.annulla_rinvio()
+        verifica(stato().rinvii == 1,
+                 "a 5 min dall'orario rinviato: annullo rifiutato (lo spegnimento salterebbe)")
+    finally:
+        m.adesso = reale
+    app.annulla_rinvio()
+    verifica(stato().rinvii == 0, "lontano dall'orario: annullo accettato")
     # Ferma il tick per un controllo deterministico dell'ordine delle finestre
     app._vivo = False
     root.after(1500, passo2)
