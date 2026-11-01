@@ -1,4 +1,4 @@
-const CACHE = 'sleep-countdown-v4';
+const CACHE = 'sleep-countdown-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -8,7 +8,13 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  // cache:'reload' salta la cache HTTP del browser: senza, un collaudo
+  // entro pochi minuti dal deploy precarica ancora la versione vecchia.
+  e.waitUntil(
+    caches.open(CACHE).then((c) =>
+      c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))
+    )
+  );
   self.skipWaiting();
 });
 

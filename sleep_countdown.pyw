@@ -4,7 +4,10 @@ Calcolatore ore di sonno con spegnimento automatico del PC - GUI real-time.
 Calcola A RITROSO dalla sveglia l'orario a cui andare a dormire (inizio
 della routine serale), dati le ore di sonno desiderate e i minuti di
 lettura, scontando i tempi fissi: buffer addormentamento, passeggiata
-cane, riassetto cucina + pulizia personale.
+cane, riassetto cucina + pulizia personale. Il tasto "Vado a dormire ora"
+passa al calcolo IN AVANTI: dall'ora attuale ricava l'ora della sveglia.
+Il modo in avanti e' solo una vista: lo spegnimento segue sempre le
+sveglie della settimana. All'avvio si riparte a ritroso.
 
 Integra un timer di spegnimento sul modello di Shutdown Timer Classic:
 l'inizio della routine serale (piu' una correzione in minuti) diventa
@@ -67,6 +70,7 @@ BG = "#0d1117"
 FG_TITLE = "#c9d1d9"
 FG_MUTED = "#8b949e"
 FG_DIM = "#6e7681"
+FG_OFF = "#484f58"    # campo escluso dal calcolo corrente
 COL_OK = "#3fb950"
 COL_WARN = "#d29922"
 COL_BAD = "#f85149"
@@ -229,6 +233,19 @@ def calcola_catena(sveglia, sonno_h, sonno_m, lettura, cane, cucina):
     a_letto = addormentato - timedelta(minutes=BUFFER_ADDORMENTAMENTO_MIN)
     vai_a_dormire = a_letto - timedelta(minutes=lettura + cane + cucina)
     return addormentato, a_letto, vai_a_dormire
+
+
+def calcola_catena_avanti(now, sonno_h, sonno_m, lettura, cane, cucina):
+    """Catena in avanti: la routine parte adesso -> (a letto, addormentato, sveglia)."""
+    a_letto = now + timedelta(minutes=lettura + cane + cucina)
+    addormentato = a_letto + timedelta(minutes=BUFFER_ADDORMENTAMENTO_MIN)
+    sveglia = addormentato + timedelta(hours=sonno_h, minutes=sonno_m)
+    return a_letto, addormentato, sveglia
+
+
+def formatta_sonno(minuti: int) -> str:
+    """Durata del sonno: '7h' oppure '7h30'."""
+    return f"{minuti // 60}h" if minuti % 60 == 0 else f"{minuti // 60}h{minuti % 60:02d}"
 
 
 def chiave_serata(sveglia: datetime) -> str:
@@ -868,6 +885,8 @@ class SonnoApp:
         self._fase = False            # lampeggio dell'ultimo minuto
         self._dlg_settimana = None
         self._dlg_manuale = None
+        # False = a ritroso dalla sveglia, True = in avanti dall'ora attuale (non memorizzato)
+        self.modo_avanti = False
         # Stato letto dal menu dell'icona (thread di pystray): solo valori semplici
         self._puo_rinviare = False
         self._puo_annullare = False
@@ -906,10 +925,11 @@ class SonnoApp:
             self.root, text="\U0001F319  A che ora dormire",
             font=("Segoe UI", 16, "bold"), fg=FG_TITLE, bg=BG,
         ).pack(pady=(15, 2))
-        tk.Label(
+        self.subtitle_label = tk.Label(
             self.root, text="L'ora per coricarti e dormire quanto vuoi",
             font=("Segoe UI", 9), fg=FG_DIM, bg=BG,
-        ).pack(pady=(0, 10))
+        )
+        self.subtitle_label.pack(pady=(0, 10))
 
         form = tk.Frame(self.root, bg=BG)
         form.pack(pady=2)
@@ -918,12 +938,16 @@ class SonnoApp:
         minutes15 = [f"{i:02d}" for i in range(0, 60, 15)]
 
         # --- Riga sveglia: modifica la sveglia del giorno indicato ---
+        # (si attenua nel modo in avanti, dove la sveglia e' il risultato)
         self.sveglia_label = _etichetta(form, "Sveglia:")
         self.sveglia_label.grid(row=0, column=0, padx=5, pady=4, sticky="e")
-        _combo(form, self.hour_var, ORE).grid(row=0, column=1)
-        tk.Label(form, text=":", fg=FG_TITLE, bg=BG,
-                 font=("Segoe UI", 12, "bold")).grid(row=0, column=2)
-        _combo(form, self.minute_var, MINUTI5).grid(row=0, column=3, sticky="w")
+        self.sveglia_h_combo = _combo(form, self.hour_var, ORE)
+        self.sveglia_h_combo.grid(row=0, column=1)
+        self.sveglia_due_punti = tk.Label(form, text=":", fg=FG_TITLE, bg=BG,
+                                          font=("Segoe UI", 12, "bold"))
+        self.sveglia_due_punti.grid(row=0, column=2)
+        self.sveglia_m_combo = _combo(form, self.minute_var, MINUTI5)
+        self.sveglia_m_combo.grid(row=0, column=3, sticky="w")
         _bottone(form, "Settimana…", self.apri_settimana).grid(row=0, column=4, padx=(8, 0))
 
         # --- Riga sonno desiderato ---
@@ -954,12 +978,22 @@ class SonnoApp:
         _check(extras, self.cucina_on,
                f"Cucina/igiene (+{CUCINA_IGIENE_MIN})").pack(side="left", padx=8)
 
-        # --- Risultato: orario a cui coricarsi ---
+        # --- Tasto di commutazione fra calcolo a ritroso e in avanti ---
+        self.mode_btn = tk.Button(
+            self.root, text="Vado a dormire ora  →",
+            font=("Segoe UI", 10, "bold"), fg=FG_TITLE, bg=BTN_BG,
+            activebackground=BORDO, activeforeground=FG_TITLE,
+            relief="flat", bd=0, padx=16, pady=7, cursor="hand2",
+            command=self.commuta_modo,
+        )
+        self.mode_btn.pack(pady=(14, 0))
+
+        # --- Risultato: orario a cui coricarsi, oppure sveglia nel modo in avanti ---
         self.result_label = tk.Label(
             self.root, text="--:--",
             font=("Segoe UI", 44, "bold"), fg=COL_INFO, bg=BG,
         )
-        self.result_label.pack(pady=(18, 2))
+        self.result_label.pack(pady=(14, 2))
 
         # Countdown "tra quanto / in ritardo di"
         self.sub_label = tk.Label(
@@ -1273,6 +1307,9 @@ class SonnoApp:
             valida = False
         self.reading_entry.config(highlightbackground=BORDO if valida else COL_BAD)
         self._refresh_buffer()
+        if self.modo_avanti:
+            self._mostra_avanti(now)
+            return
         if catena is None:
             self.result_label.config(text="--:--", fg=COL_WARN)
             self.sub_label.config(text="Nessuna sveglia attiva", fg=COL_WARN)
@@ -1297,16 +1334,52 @@ class SonnoApp:
 
         # Riepilogo sveglia + sonno + orari intermedi
         wd = GIORNI[sveglia.weekday()]
-        sonno_min = int((sveglia - addormentato).total_seconds() // 60)
-        if sonno_min % 60 == 0:
-            sonno_txt = f"{sonno_min // 60}h"
-        else:
-            sonno_txt = f"{sonno_min // 60}h{sonno_min % 60:02d}"
+        sonno_txt = formatta_sonno(int((sveglia - addormentato).total_seconds() // 60))
         self.info_label.config(
             text=(f"Sveglia {wd} {sveglia.strftime('%H:%M')}  ·  dormi {sonno_txt}\n"
                   f"a letto {a_letto.strftime('%H:%M')}  ·  "
                   f"addormentato {addormentato.strftime('%H:%M')}")
         )
+
+    def _mostra_avanti(self, now: datetime) -> None:
+        """Modo in avanti: la routine parte adesso, il risultato e' l'ora della sveglia."""
+        imp = self.imp
+        lettura = imp["lettura_min"] if imp["lettura_on"] else 0
+        cane = PASSEGGIATA_CANE_MIN if imp["cane_on"] else 0
+        cucina = CUCINA_IGIENE_MIN if imp["cucina_on"] else 0
+        a_letto, addormentato, sveglia = calcola_catena_avanti(
+            now, imp["sonno_h"], imp["sonno_m"], lettura, cane, cucina)
+        # Niente semaforo: non esiste un ritardo
+        self.result_label.config(text=sveglia.strftime("%H:%M"), fg=COL_INFO)
+        self.sub_label.config(
+            text=f"sveglia di {GIORNI[sveglia.weekday()]}  ·  tra "
+                 f"{formatta_durata((sveglia - now).total_seconds())}",
+            fg=FG_MUTED)
+        sonno_txt = formatta_sonno(imp["sonno_h"] * 60 + imp["sonno_m"])
+        self.info_label.config(
+            text=(f"Inizi adesso {now:%H:%M}  ·  dormi {sonno_txt}\n"
+                  f"a letto {a_letto:%H:%M}  ·  addormentato {addormentato:%H:%M}"))
+
+    def commuta_modo(self) -> None:
+        """Passa dal calcolo a ritroso a quello in avanti, e viceversa."""
+        self.modo_avanti = avanti = not self.modo_avanti
+        self.mode_btn.config(
+            text="←  Torna all'ora di coricarti" if avanti else "Vado a dormire ora  →",
+            bg=COL_INFO if avanti else BTN_BG,
+            fg=BG if avanti else FG_TITLE,
+            activebackground="#79c0ff" if avanti else BORDO,
+            activeforeground=BG if avanti else FG_TITLE,
+        )
+        self.subtitle_label.config(
+            text="A che ora suonare la sveglia, se ti corichi adesso" if avanti
+            else "L'ora per coricarti e dormire quanto vuoi")
+        # Nel modo in avanti la sveglia e' il risultato: la riga Sveglia esce dal calcolo
+        self.sveglia_label.config(fg=FG_OFF if avanti else FG_MUTED)
+        self.sveglia_due_punti.config(fg=FG_OFF if avanti else FG_TITLE)
+        stato = "disabled" if avanti else "readonly"
+        self.sveglia_h_combo.config(state=stato)
+        self.sveglia_m_combo.config(state=stato)
+        self._aggiorna()
 
     def _refresh_buffer(self) -> None:
         """Riga dei tempi sottratti: solo le voci attive."""

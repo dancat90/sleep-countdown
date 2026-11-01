@@ -124,6 +124,24 @@ def passo1():
         verifica(cd._posizione(False) == tuple(pos2),
                  "durante la sessione la posizione sul secondario resta valida")
     verifica(app._cd_al_primario is False, "la regola del principale vale solo al primo aggiornamento")
+    # Tasto "Vado a dormire ora": vista in avanti, lo spegnimento non cambia
+    bersaglio_prima = app._calcola_stato(m.adesso())[2].target
+    app.commuta_modo()
+    now = m.adesso()
+    imp_ = app.imp
+    attese = m.calcola_catena_avanti(
+        now, imp_["sonno_h"], imp_["sonno_m"],
+        imp_["lettura_min"] if imp_["lettura_on"] else 0,
+        m.PASSEGGIATA_CANE_MIN if imp_["cane_on"] else 0,
+        m.CUCINA_IGIENE_MIN if imp_["cucina_on"] else 0)
+    verifica(app.result_label.cget("text") == attese[2].strftime("%H:%M"),
+             f"in avanti: il risultato e' la sveglia ({app.result_label.cget('text')})")
+    verifica(str(app.sveglia_h_combo.cget("state")) == "disabled", "in avanti: riga Sveglia disattivata")
+    verifica(app._calcola_stato(m.adesso())[2].target == bersaglio_prima,
+             "in avanti: l'orario di spegnimento non cambia")
+    app.commuta_modo()
+    verifica(not app.modo_avanti and str(app.sveglia_h_combo.cget("state")) == "readonly",
+             "ritorno a ritroso: riga Sveglia di nuovo attiva")
     # Ferma il tick per un controllo deterministico dell'ordine delle finestre
     app._vivo = False
     root.after(1500, passo2)

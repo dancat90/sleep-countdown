@@ -72,6 +72,10 @@ verifica(m.prossima_sveglia(ven18, sv5) == datetime(2026, 10, 31, 9, 30), "sabat
 addorm, a_letto, vai = m.calcola_catena(datetime(2026, 10, 31, 7, 0), 8, 0, 30, 20, 15)
 verifica(vai == datetime(2026, 10, 30, 21, 40) and a_letto == datetime(2026, 10, 30, 22, 45)
          and addorm == datetime(2026, 10, 30, 23, 0), "caso di riferimento 21:40 / 22:45 / 23:00")
+a_letto2, addorm2, sveglia2 = m.calcola_catena_avanti(datetime(2026, 10, 30, 21, 40), 7, 0, 30, 20, 15)
+verifica(a_letto2 == datetime(2026, 10, 30, 22, 45) and addorm2 == datetime(2026, 10, 30, 23, 0)
+         and sveglia2 == datetime(2026, 10, 31, 6, 0), "in avanti: 21:40 -> a letto 22:45, sveglia 06:00")
+verifica(m.formatta_sonno(420) == "7h" and m.formatta_sonno(450) == "7h30", "durata del sonno")
 verifica(m.chiave_serata(datetime(2026, 10, 31, 7, 0)) == "2026-10-31", "chiave serata")
 
 T = datetime(2026, 10, 30, 21, 40)
