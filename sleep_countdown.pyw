@@ -10,12 +10,12 @@ Integra un timer di spegnimento sul modello di Shutdown Timer Classic:
 l'inizio della routine serale (piu' una correzione in minuti) diventa
 l'orario dell'azione finale (spegni, riavvia, sospendi, iberna, blocca,
 disconnetti). Countdown sempre in primo piano con i colori a soglie,
-icona nell'area di notifica, avvisi a 30/10/1 minuti, rinvii limitati,
+visibile da subito all'avvio sul monitor principale, icona nell'area di notifica, avvisi a 30/10/1 minuti, rinvii limitati,
 annullo per la serata, timer manuale classico. Sveglia per giorno della
 settimana: un giorno spento non ha sveglia e la sera prima non spegne.
 
-Uso: pythonw sonno_gui.pyw [--nascosta]
-  --nascosta  parte solo nell'area di notifica (avvio all'accesso)
+Uso: pythonw sleep_countdown.pyw [--nascosta]
+  --nascosta  finestra principale nascosta: restano icona e countdown (avvio all'accesso)
 Una seconda esecuzione non apre un altro timer: mostra la finestra attiva.
 
 Gemello desktop della web app PWA (stesso repo: index.html); la parte di
@@ -29,6 +29,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import traceback
 from ctypes import wintypes
@@ -408,7 +409,28 @@ def _user32():
     u32.MonitorFromPoint.restype = wintypes.HMONITOR
     u32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
     u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    u32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    u32.GetAncestor.restype = wintypes.HWND
+    u32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                 ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    u32.SetWindowPos.restype = wintypes.BOOL
     return u32
+
+
+# --- Primo piano: SetWindowPos(HWND_TOPMOST) senza spostare, ridimensionare o attivare ---
+_HWND_TOPMOST = -1
+_SWP_IN_CIMA = 0x0001 | 0x0002 | 0x0010 | 0x0200   # NOSIZE | NOMOVE | NOACTIVATE | NOOWNERZORDER
+_GA_ROOT = 2
+MENU_PAUSA_MAX_S = 15   # rete di sicurezza: oltre questo il menu si considera chiuso
+
+
+def porta_in_cima(finestra) -> None:
+    """Porta la finestra sopra tutte, comprese le altre 'sempre in primo piano', senza focus."""
+    u32 = _user32()
+    # winfo_id e' la finestra interna di Tk: quella da riordinare e' la radice
+    hwnd = u32.GetAncestor(finestra.winfo_id(), _GA_ROOT)
+    if hwnd:
+        u32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_IN_CIMA)
 
 
 def monitor_di(x: int, y: int, nullo_se_fuori: bool = False):
@@ -529,6 +551,7 @@ class FinestraCountdown:
         self.app = app
         self.visibile = False
         self._drag = None
+        self._menu_aperto = None   # istante di apertura del menu del tasto destro, None se chiuso
         self.win = tk.Toplevel(app.root)
         self.win.withdraw()
         self.win.overrideredirect(True)
@@ -566,15 +589,28 @@ class FinestraCountdown:
             self.app.memorizza_dim_countdown(nuova)
             self._applica_dimensione()
 
-    def mostra(self) -> None:
+    def mostra(self, solo_primario: bool = False) -> None:
         if not self.visibile:
             self.win.update_idletasks()
-            x, y = self._posizione()
+            x, y = self._posizione(solo_primario)
             self.win.geometry(f"+{x}+{y}")
             self.win.deiconify()
             self.visibile = True
         self.win.lift()
         self.win.attributes("-topmost", True)
+
+    def mantieni_in_cima(self) -> None:
+        """Chiamata a ogni tick: riporta il countdown sopra le altre finestre in primo piano.
+
+        Sospesa a menu del tasto destro aperto, altrimenti il countdown lo coprirebbe.
+        """
+        if not self.visibile:
+            return
+        if self._menu_aperto is not None:
+            if time.monotonic() - self._menu_aperto < MENU_PAUSA_MAX_S:
+                return
+            self._menu_aperto = None
+        porta_in_cima(self.win)
 
     def nascondi(self) -> None:
         if self.visibile:
@@ -601,13 +637,20 @@ class FinestraCountdown:
         self.win.geometry(f"+{x}+{y}")
         self.app.memorizza_pos_countdown(x, y)
 
-    def _posizione(self) -> tuple[int, int]:
-        """Ultima posizione salvata, se cade su un monitor; altrimenti angolo del primario."""
+    def _posizione(self, solo_primario: bool = False) -> tuple[int, int]:
+        """Ultima posizione salvata, se cade su un monitor; altrimenti angolo del primario.
+
+        Con solo_primario=True (avvio del programma) la posizione salvata vale solo
+        se cade sul monitor principale.
+        """
         w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
+        primario = monitor_di(0, 0)   # il monitor principale ha sempre l'origine in (0, 0)
         pos = self.app.imp.get("countdown_pos")
-        if pos and monitor_di(pos[0] + w // 2, pos[1] + h // 2, nullo_se_fuori=True):
-            return pos[0], pos[1]
-        primario = monitor_di(0, 0)
+        if pos:
+            monitor = monitor_di(pos[0] + w // 2, pos[1] + h // 2, nullo_se_fuori=True)
+            if monitor and (not solo_primario
+                            or (primario is not None and monitor[0] == primario[0])):
+                return pos[0], pos[1]
         if primario:
             return _angolo(primario[1], w, h)
         return (self.win.winfo_screenwidth() - w - 24, self.win.winfo_screenheight() - h - 72)
@@ -632,10 +675,13 @@ class FinestraCountdown:
         menu.add_command(label=self.app._etichetta_annulla_cd, command=self.app.annulla_o_ferma)
         menu.add_separator()
         menu.add_command(label="Nascondi", command=self.nascondi)
+        # Su Windows tk_popup ritorna a menu chiuso: fino ad allora niente riordino in cima
+        self._menu_aperto = time.monotonic()
         try:
             menu.tk_popup(evento.x_root, evento.y_root)
         finally:
             menu.grab_release()
+            self._menu_aperto = None
 
 
 # ======================================================================
@@ -814,7 +860,9 @@ class SonnoApp:
         self._prev_now = None         # tick precedente, per la regola di scatto
         self._prev_target = None
         self._notificate = set()      # (bersaglio, soglia) gia' avvisati
-        self._mostra_cd = False       # richiesta di mostrare il countdown al prossimo aggiornamento
+        # All'avvio il countdown compare subito, e sul monitor principale
+        self._mostra_cd = True        # richiesta di mostrare il countdown al prossimo aggiornamento
+        self._cd_al_primario = True   # vale solo per il primo aggiornamento
         self._anti_sosp = None
         self._da_salvare = False
         self._fase = False            # lampeggio dell'ultimo minuto
@@ -1000,6 +1048,7 @@ class SonnoApp:
         self._fase = not self._fase
         try:
             self._aggiorna()
+            self.countdown.mantieni_in_cima()
             if self._da_salvare:
                 self._salva()
         except Exception:
@@ -1321,10 +1370,11 @@ class SonnoApp:
             titolo = f"{stato.azione} {stato.target:%H:%M}" + (" · prova" if sp["prova"] else "")
             self.countdown.aggiorna(rimasti, titolo, self._fase)
             if self._mostra_cd:
-                self.countdown.mostra()
+                self.countdown.mostra(solo_primario=self._cd_al_primario)
         elif not armato:
             self.countdown.nascondi()
         self._mostra_cd = False
+        self._cd_al_primario = False
 
         # Anti-sospensione solo con un bersaglio armato
         voglio = armato and sp["impedisci_sospensione"]
